@@ -1,46 +1,93 @@
 class AccessibilityWidget extends HTMLElement {
     connectedCallback() {
         this.innerHTML = `
-      <div id="accessibility-toggle" style="position:fixed;bottom:20px;right:20px;z-index:10000;">
-        <button id="accessibilityToggleButton" style="background:#007BFF;color:white;border:none;border-radius:50%;width:50px;height:50px;font-size:24px;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,0.3);">♿</button>
-      </div>
-      <div id="accessibilityPanel" style="display:none;position:fixed;bottom:80px;right:20px;background:#fff;padding:15px 10px;border-radius:10px;z-index:9999;box-shadow:0 2px 10px rgba(0,0,0,0.3);width:300px;font-family:sans-serif;">
-        <div style="display:flex;flex-wrap:wrap;gap:6px;justify-content:space-between;">
-          <button id="increaseFont" style="flex:1">A+</button>
-          <button id="decreaseFont" style="flex:1">A-</button>
-          <button id="toggleTheme" style="flex:1">🌙/☀️</button>
-          <button id="reset" style="flex:1">🔄</button>
-        </div>
-        <label style="margin-top:10px;display:block;font-size:12px;">Font Color</label>
-        <select id="fontColor" style="width:100%;margin-bottom:8px;">
-          <option value="black">Black</option>
-          <option value="red">Red</option>
-          <option value="blue">Blue</option>
-          <option value="green">Green</option>
-          <option value="orange">Orange</option>
-          <option value="purple">Purple</option>
-        </select>
-        <label style="font-size:12px;">Voice</label>
-        <select id="voiceSelect" style="width:100%;margin-bottom:8px;"></select>
-        <div style="display:flex;justify-content:space-between;">
-          <button id="speak" style="flex:1;margin-right:5px;">🔊 Speak</button>
-          <button id="stopSpeak" style="flex:1">⏹️ Stop</button>
+      <div style="display:flex;height:100vh;font-family:sans-serif;">
+        <!-- Left PDF viewer -->
+        <div id="pdf-viewer" style="flex:1;overflow:auto;padding:20px;border-right:2px solid #ddd;background:#f9f9f9;"></div>
+        
+        <!-- Right: Controls and Text Editor -->
+        <div style="flex:1;display:flex;flex-direction:column;padding:15px;">
+          <!-- Accessibility Controls -->
+          <div id="accessibilityPanel" style="background:#fff;padding:10px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.2);margin-bottom:10px;">
+            <div style="display:flex;gap:5px;flex-wrap:wrap;justify-content:space-between;">
+              <button id="increaseFont" style="flex:1">A+</button>
+              <button id="decreaseFont" style="flex:1">A-</button>
+              <button id="toggleTheme" style="flex:1">🌙/☀️</button>
+              <button id="reset" style="flex:1">🔄</button>
+            </div>
+            <label style="font-size:12px;margin-top:10px;display:block;">Font Color</label>
+            <select id="fontColor" style="width:100%;margin-bottom:8px;">
+              <option value="black">Black</option>
+              <option value="red">Red</option>
+              <option value="blue">Blue</option>
+              <option value="green">Green</option>
+              <option value="orange">Orange</option>
+              <option value="purple">Purple</option>
+            </select>
+            <label style="font-size:12px;">Voice</label>
+            <select id="voiceSelect" style="width:100%;margin-bottom:8px;"></select>
+            <div style="display:flex;gap:5px;">
+              <button id="speak" style="flex:1">🔊 Speak</button>
+              <button id="stopSpeak" style="flex:1">⏹️ Stop</button>
+            </div>
+          </div>
+
+          <!-- Editable Text Area -->
+          <textarea id="pdf-text-editor" style="flex:1;width:100%;resize:none;font-size:16px;line-height:1.6;border:1px solid #ccc;border-radius:6px;padding:10px;"></textarea>
         </div>
       </div>
     `;
 
+        // Variables
         let fontSize = 16;
         let isDarkMode = false;
+        let currentColor = 'black';
         let hoverUtterance = null;
+        let voices = [];
 
-        const panel = this.querySelector('#accessibilityPanel');
-        const toggleBtn = this.querySelector('#accessibilityToggleButton');
-        toggleBtn.onclick = () => {
-            panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+        const editor = this.querySelector('#pdf-text-editor');
+        const viewer = this.querySelector('#pdf-viewer');
+        const voiceSelect = this.querySelector('#voiceSelect');
+
+        const languageLabels = {
+            "en": "English", "hi": "Hindi", "mr": "Marathi", "ur": "Urdu", "bn": "Bengali",
+            "ta": "Tamil", "te": "Telugu", "gu": "Gujarati", "kn": "Kannada", "ml": "Malayalam",
+            "pa": "Punjabi", "or": "Odia", "as": "Assamese", "fa": "Persian", "fr": "French",
+            "de": "German", "es": "Spanish", "zh": "Chinese", "ja": "Japanese", "ko": "Korean"
         };
 
+        // Voice setup
+        function populateVoices() {
+            voices = speechSynthesis.getVoices();
+            voiceSelect.innerHTML = '';
+            voices.forEach((voice, index) => {
+                const baseLang = voice.lang.split('-')[0];
+                const option = document.createElement('option');
+                option.value = index;
+                option.textContent = `${voice.name} — ${languageLabels[baseLang] || voice.lang}`;
+                voiceSelect.appendChild(option);
+            });
+        }
+
+        speechSynthesis.onvoiceschanged = () => populateVoices();
+        populateVoices();
+
+        // Accessibility Controls
         const updateFontSize = () => {
-            document.body.style.fontSize = `${fontSize}px`;
+            editor.style.fontSize = `${fontSize}px`;
+        };
+
+        const updateColor = (color) => {
+            currentColor = color;
+            editor.style.color = currentColor;
+        };
+
+        const updateTheme = () => {
+            const bgColor = isDarkMode ? '#121212' : '#ffffff';
+            const textColor = isDarkMode ? '#ffffff' : currentColor;
+            editor.style.backgroundColor = bgColor;
+            editor.style.color = textColor;
+            document.body.style.backgroundColor = bgColor;
         };
 
         this.querySelector('#increaseFont').onclick = () => {
@@ -55,53 +102,25 @@ class AccessibilityWidget extends HTMLElement {
 
         this.querySelector('#toggleTheme').onclick = () => {
             isDarkMode = !isDarkMode;
-            document.body.style.backgroundColor = isDarkMode ? '#121212' : '#ffffff';
-            document.body.style.color = isDarkMode ? '#ffffff' : '#000000';
+            updateTheme();
         };
 
         this.querySelector('#reset').onclick = () => {
             fontSize = 16;
             isDarkMode = false;
-            document.body.style.fontSize = '16px';
-            document.body.style.backgroundColor = '';
-            document.body.style.color = '';
+            currentColor = 'black';
+            updateFontSize();
+            updateTheme();
         };
 
         this.querySelector('#fontColor').onchange = (e) => {
-            const color = e.target.value;
-            document.body.style.color = color;
+            updateColor(e.target.value);
         };
 
-        const voiceSelect = this.querySelector('#voiceSelect');
-        let voices = [];
-
-        const languageLabels = {
-            "en": "English", "hi": "Hindi", "mr": "Marathi", "ur": "Urdu", "bn": "Bengali", "ta": "Tamil", "te": "Telugu",
-            "gu": "Gujarati", "kn": "Kannada", "ml": "Malayalam", "pa": "Punjabi", "or": "Odia", "as": "Assamese",
-            "fa": "Persian", "fr": "French", "de": "German", "es": "Spanish", "zh": "Chinese", "ja": "Japanese", "ko": "Korean"
-        };
-
-        function populateVoices() {
-            voices = speechSynthesis.getVoices();
-            voiceSelect.innerHTML = '';
-
-            voices.forEach((voice, index) => {
-                const baseLang = voice.lang.split('-')[0];
-                const option = document.createElement('option');
-                option.value = index;
-                option.textContent = `${voice.name} — ${languageLabels[baseLang] || voice.lang}`;
-                voiceSelect.appendChild(option);
-            });
-        }
-
-        speechSynthesis.onvoiceschanged = () => {
-            populateVoices();
-        };
-        populateVoices();
-
+        // TTS
         this.querySelector('#speak').onclick = () => {
             const selection = window.getSelection().toString();
-            const textToRead = selection || document.body.innerText;
+            const textToRead = selection || editor.value;
             const utterance = new SpeechSynthesisUtterance(textToRead);
             const selectedVoice = voices[voiceSelect.value];
             if (selectedVoice) utterance.voice = selectedVoice;
@@ -112,6 +131,7 @@ class AccessibilityWidget extends HTMLElement {
             speechSynthesis.cancel();
         };
 
+        // Hover TTS (optional)
         document.body.addEventListener('mouseover', (e) => {
             const target = e.target;
             if (target && target.innerText && target.innerText.trim().length > 0 && !target.closest('accessibility-widget')) {
@@ -133,6 +153,35 @@ class AccessibilityWidget extends HTMLElement {
                 hoverUtterance = null;
             }
         });
+
+        // PDF Rendering + Extraction
+        const renderPDFWithExtraction = async (url) => {
+            try {
+                const pdf = await window.pdfjsLib.getDocument(url).promise;
+                let allText = '';
+                for (let i = 1; i <= pdf.numPages; i++) {
+                    const page = await pdf.getPage(i);
+                    const viewport = page.getViewport({ scale: 1.2 });
+
+                    const canvas = document.createElement('canvas');
+                    canvas.width = viewport.width;
+                    canvas.height = viewport.height;
+                    const ctx = canvas.getContext('2d');
+                    await page.render({ canvasContext: ctx, viewport }).promise;
+                    viewer.appendChild(canvas);
+
+                    const textContent = await page.getTextContent();
+                    const pageText = textContent.items.map(item => item.str).join(' ');
+                    allText += pageText + "\n\n";
+                }
+                editor.value = allText.trim();
+            } catch (err) {
+                console.error('PDF rendering/extraction failed:', err);
+            }
+        };
+
+        // Load PDF (change path as needed)
+        renderPDFWithExtraction('/sample.pdf');
     }
 }
 
