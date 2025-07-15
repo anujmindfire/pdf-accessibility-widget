@@ -1,14 +1,12 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Accessible PDF Viewer</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.min.js"></script>
   <style>
-    body,
-    html {
+    html, body {
       margin: 0;
       height: 100%;
       font-family: 'Segoe UI', sans-serif;
@@ -27,9 +25,7 @@
       flex-wrap: wrap;
     }
 
-    .toolbar button,
-    .toolbar input,
-    .toolbar select {
+    .toolbar button, .toolbar input, .toolbar select {
       padding: 6px 10px;
       border: none;
       border-radius: 4px;
@@ -86,7 +82,7 @@
     .page-wrapper {
       position: relative;
       margin: 15px auto;
-      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+      box-shadow: 0 4px 8px rgba(0,0,0,0.3);
       background: white;
     }
 
@@ -98,12 +94,45 @@
       bottom: 0;
     }
 
-    .text-layer>span {
+    .text-layer > span {
       position: absolute;
       white-space: pre;
       cursor: text;
       color: transparent;
       transform-origin: left top;
+    }
+
+    #mask-layer {
+      position: absolute;
+      pointer-events: none;
+      width: 100%;
+      height: 100%;
+      top: 0;
+      left: 0;
+      z-index: 99;
+    }
+
+    .mask-line {
+      position: absolute;
+      width: 100%;
+      height: 40px;
+      background: rgba(0, 0, 0, 0.5);
+      pointer-events: none;
+      z-index: 99;
+      mix-blend-mode: multiply;
+    }
+
+    #plain-text-mode {
+      display: none;
+      color: black;
+      background: white;
+      padding: 1em;
+      max-width: 800px;
+      margin: auto;
+      white-space: pre-wrap;
+      text-align: left;
+      font-size: 16px;
+      line-height: 1.5;
     }
   </style>
 </head>
@@ -112,8 +141,10 @@
   <div class="toolbar">
     <button id="read-btn">🔊 Read</button>
     <select id="voice-select" title="Choose language"></select>
-    <button id="font-inc-btn">A+</button>
-    <button id="font-dec-btn">A-</button>
+    <button id="zoom-in-btn">Zoom In</button>
+    <button id="zoom-out-btn">Zoom Out</button>
+    <button id="toggle-mask">👁 Mask</button>
+    <button id="toggle-plain-text">📄 Plain Text</button>
     <label>Text</label><input type="color" id="text-color" value="#000000">
     <label>BG</label><input type="color" id="bg-color" value="#ffffff">
     <button id="reset-btn">🔄 Reset</button>
@@ -124,7 +155,8 @@
     <div id="root"></div>
     <div class="sidebar" id="sidebar"></div>
     <div class="content" id="content">
-      <p>Loading PDF...</p>
+      <div id="mask-layer" style="display:none;"></div>
+      <div id="plain-text-mode"></div>
     </div>
   </div>
 
@@ -133,66 +165,70 @@
     const content = document.getElementById('content');
     const sidebar = document.getElementById('sidebar');
     const voiceSelect = document.getElementById('voice-select');
+    const maskLayer = document.getElementById('mask-layer');
+    const plainTextBox = document.getElementById('plain-text-mode');
+    const togglePlainBtn = document.getElementById('toggle-plain-text');
 
     let pdfDoc = null;
+    let scale = 1.5;
     let fullText = [];
-    let fontScale = 1.0;
     let selectedVoice = null;
+    let maskEnabled = false;
+    let maskLine;
+    let plainTextMode = false;
 
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.worker.min.js';
 
-    async function renderPDF() {
-      try {
-        pdfDoc = await pdfjsLib.getDocument(PDF_URL).promise;
-        content.innerHTML = '';
-        sidebar.innerHTML = '';
-        fullText = [];
+    async function renderPages(scaleValue) {
+      content.querySelectorAll('.page-wrapper').forEach(el => el.remove());
+      fullText = [];
+      sidebar.innerHTML = '';
 
-        for (let i = 1; i <= pdfDoc.numPages; i++) {
-          const page = await pdfDoc.getPage(i);
-          const viewport = page.getViewport({ scale: 1.5 });
+      for (let i = 1; i <= pdfDoc.numPages; i++) {
+        const page = await pdfDoc.getPage(i);
+        const viewport = page.getViewport({ scale: scaleValue });
 
-          const wrapper = document.createElement('div');
-          wrapper.className = 'page-wrapper';
-          wrapper.id = `page-${i}`;
-          wrapper.style.width = viewport.width + 'px';
-          wrapper.style.height = viewport.height + 'px';
+        const wrapper = document.createElement('div');
+        wrapper.className = 'page-wrapper';
+        wrapper.id = `page-${i}`;
+        wrapper.style.width = viewport.width + 'px';
+        wrapper.style.height = viewport.height + 'px';
 
-          const canvas = document.createElement('canvas');
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
-          const ctx = canvas.getContext('2d');
+        const canvas = document.createElement('canvas');
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        const ctx = canvas.getContext('2d');
 
-          const textLayer = document.createElement('div');
-          textLayer.className = 'text-layer';
-          wrapper.appendChild(canvas);
-          wrapper.appendChild(textLayer);
-          content.appendChild(wrapper);
+        const textLayer = document.createElement('div');
+        textLayer.className = 'text-layer';
+        wrapper.appendChild(canvas);
+        wrapper.appendChild(textLayer);
+        content.appendChild(wrapper);
 
-          await page.render({ canvasContext: ctx, viewport }).promise;
+        await page.render({ canvasContext: ctx, viewport }).promise;
 
-          const textContent = await page.getTextContent();
-          pdfjsLib.renderTextLayer({
-            textContent, container: textLayer, viewport, textDivs: []
-          });
+        const textContent = await page.getTextContent();
+        pdfjsLib.renderTextLayer({ textContent, container: textLayer, viewport, textDivs: [] });
 
-          fullText.push({ page: i, text: textContent.items.map(item => item.str).join(' ') });
+        fullText.push({ page: i, text: textContent.items.map(item => item.str).join(' ') });
 
-          const thumbViewport = page.getViewport({ scale: 0.2 });
-          const thumbCanvas = document.createElement('canvas');
-          thumbCanvas.width = thumbViewport.width;
-          thumbCanvas.height = thumbViewport.height;
-          const thumbCtx = thumbCanvas.getContext('2d');
-          await page.render({ canvasContext: thumbCtx, viewport: thumbViewport }).promise;
-          thumbCanvas.addEventListener('click', () => {
-            document.getElementById(`page-${i}`).scrollIntoView({ behavior: 'smooth' });
-          });
-          sidebar.appendChild(thumbCanvas);
-        }
-      } catch (err) {
-        content.innerHTML = '<p style="color:red;">Failed to load PDF. CORS issue?</p>';
-        console.error(err);
+        const thumbViewport = page.getViewport({ scale: 0.2 });
+        const thumbCanvas = document.createElement('canvas');
+        thumbCanvas.width = thumbViewport.width;
+        thumbCanvas.height = thumbViewport.height;
+        const thumbCtx = thumbCanvas.getContext('2d');
+        await page.render({ canvasContext: thumbCtx, viewport: thumbViewport }).promise;
+        thumbCanvas.addEventListener('click', () => {
+          document.getElementById(`page-${i}`).scrollIntoView({ behavior: 'smooth' });
+        });
+        sidebar.appendChild(thumbCanvas);
       }
+
+      updatePlainTextBox();
+    }
+
+    function updatePlainTextBox() {
+      plainTextBox.textContent = fullText.map(p => `Page ${p.page}\n${p.text}`).join('\n\n---\n\n');
     }
 
     function speakFullText() {
@@ -214,8 +250,12 @@
     }
 
     function updateTextColor(color) {
-      document.querySelectorAll('.text-layer > span').forEach(span => {
+      const spans = document.querySelectorAll('.text-layer > span');
+      spans.forEach(span => {
         span.style.color = color;
+      });
+      document.querySelectorAll('.page-wrapper > canvas').forEach(canvas => {
+        canvas.style.display = 'none';
       });
     }
 
@@ -225,18 +265,30 @@
     }
 
     function resetAll() {
-      fontScale = 1.0;
-      updateFontScale();
+      document.querySelectorAll('.text-layer > span').forEach(span => {
+        span.style.fontSize = '';
+        span.style.color = 'transparent';
+      });
+      document.querySelectorAll('.page-wrapper > canvas').forEach(canvas => {
+        canvas.style.display = 'block';
+      });
       updateBgColor('#ffffff');
-      updateTextColor('#000000');
       document.getElementById('text-color').value = '#000000';
       document.getElementById('bg-color').value = '#ffffff';
     }
 
-    function updateFontScale() {
-      document.querySelectorAll('.text-layer > span').forEach(span => {
-        span.style.transform = `scale(${fontScale})`;
-      });
+    function zoomIn() {
+      if (!plainTextMode) {
+        scale += 0.1;
+        renderPages(scale);
+      }
+    }
+
+    function zoomOut() {
+      if (!plainTextMode) {
+        scale = Math.max(0.5, scale - 0.1);
+        renderPages(scale);
+      }
     }
 
     function loadVoices() {
@@ -254,23 +306,50 @@
       if (voices.length > 0) selectedVoice = voices[0];
     }
 
-    // Init and Events
+    // Plain Text Toggle
+    togglePlainBtn.addEventListener('click', () => {
+      plainTextMode = !plainTextMode;
+      document.querySelectorAll('.page-wrapper').forEach(el => el.style.display = plainTextMode ? 'none' : 'block');
+      plainTextBox.style.display = plainTextMode ? 'block' : 'none';
+      sidebar.style.display = plainTextMode ? 'none' : 'block';
+    });
+
+    // Masking
+    document.getElementById('toggle-mask').addEventListener('click', () => {
+      maskEnabled = !maskEnabled;
+      if (maskEnabled) {
+        maskLayer.style.display = 'block';
+        maskLine = document.createElement('div');
+        maskLine.className = 'mask-line';
+        maskLayer.appendChild(maskLine);
+      } else {
+        maskLayer.style.display = 'none';
+        if (maskLine) maskLine.remove();
+      }
+    });
+
+    content.addEventListener('mousemove', (e) => {
+      if (!maskEnabled || !maskLine) return;
+      const rect = content.getBoundingClientRect();
+      const y = e.clientY - rect.top + content.scrollTop;
+      maskLine.style.top = `${y - 20}px`;
+    });
+
+    // Listeners
     window.speechSynthesis.onvoiceschanged = loadVoices;
     document.getElementById('read-btn').addEventListener('click', speakFullText);
-    document.getElementById('font-inc-btn').addEventListener('click', () => {
-      fontScale += 0.1; updateFontScale();
-    });
-    document.getElementById('font-dec-btn').addEventListener('click', () => {
-      fontScale = Math.max(0.5, fontScale - 0.1); updateFontScale();
-    });
+    document.getElementById('zoom-in-btn').addEventListener('click', zoomIn);
+    document.getElementById('zoom-out-btn').addEventListener('click', zoomOut);
     document.getElementById('text-color').addEventListener('input', e => updateTextColor(e.target.value));
     document.getElementById('bg-color').addEventListener('input', e => updateBgColor(e.target.value));
     document.getElementById('reset-btn').addEventListener('click', resetAll);
     content.addEventListener('mouseup', speakSelection);
 
-    renderPDF();
-    loadVoices();
+    (async () => {
+      pdfDoc = await pdfjsLib.getDocument(PDF_URL).promise;
+      await renderPages(scale);
+      loadVoices();
+    })();
   </script>
 </body>
-
 </html>
